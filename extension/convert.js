@@ -75,3 +75,13 @@ input.addEventListener("change", () => { handle(input.files); input.value = ""; 
 // Auto-convert toggle, stored in chrome.storage.sync (default on).
 chrome.storage.sync.get("auto").then(({ auto = true }) => { autoBox.checked = auto; });
 autoBox.addEventListener("change", () => chrome.storage.sync.set({ auto: autoBox.checked }));
+
+// Last auto-convert attempt (written by background.js): when it ran, where the
+// label came from (scheme + host only) and what happened. Makes a failure
+// diagnosable without devtools.
+chrome.storage.local.get("lastAuto").then(({ lastAuto }) => {
+  const el = document.getElementById("lastAuto");
+  if (!lastAuto) { el.textContent = "Auto-convert has not run yet."; return; }
+  const when = new Date(lastAuto.at).toLocaleString();
+  el.textContent = `Last auto-convert: ${when} -- ${lastAuto.scheme}: from ${lastAuto.host} -- ${lastAuto.outcome}`;
+});

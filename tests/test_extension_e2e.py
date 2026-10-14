@@ -40,8 +40,10 @@ def test_extension_in_chromium(tmp_path):
     r = subprocess.run([NODE, os.path.join(ROOT, "extension", "test", "e2e.js"), str(fixture), str(tmp_path)],
                        cwd=ROOT, capture_output=True, text=True, timeout=180, env=dict(os.environ))
     assert r.returncode == 0, r.stdout + r.stderr
-    for step in ("extension loaded", "converter page", "ignores non-eBay", "saved a converted copy"):
+    for step in ("extension loaded", "converter page", "ignores non-eBay", "saved a converted copy",
+                 "reads a blob: label through its eBay tab", "ignores blob: labels from other sites"):
         assert step in r.stdout, r.stdout
     _assert_upright_pages(tmp_path / "page_combined.pdf", 2)
     _assert_upright_pages(tmp_path / "auto_out.pdf", 1)
+    _assert_upright_pages(tmp_path / "auto_blob_out.pdf", 1)
     assert len(PdfReader(str(tmp_path / "auto_out.pdf")).pages) == 1

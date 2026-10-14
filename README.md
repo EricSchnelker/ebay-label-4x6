@@ -36,10 +36,15 @@ there.
 
 **Permissions and why:** `downloads` (to see when a label finishes
 downloading and save the 4x6 copy), `notifications` (to tell you when
-auto-convert needs a hand), `storage` (the on/off setting), and host access
-to `https://*.ebay.com/*` only (to re-download the label you just
-downloaded; an extension cannot read files from disk). The extension makes
+auto-convert needs a hand), `storage` (the on/off setting and the last
+auto-convert result), `scripting` and host access to `https://*.ebay.com/*`
+only. An extension can't read files from disk, so it re-reads the label from
+where it came from. eBay's print page builds the PDF inside the page (a
+`blob:` link), and only that eBay tab can read it back. The extension makes
 no other network requests and reads no other sites.
+
+The converter page shows the result of the last auto-convert, so if one
+fails you can see why.
 
 ## Desktop app
 
@@ -108,10 +113,13 @@ steps below.
 
 ### Chrome extension
 
-- Auto mode acts only on downloads that came from an `https://` URL on
-  `ebay.com` or one of its subdomains. That is an exact host check, so
-  another site that names its file `eBay_label.pdf` is not auto-processed.
-  A redirect away from eBay during the re-download is refused.
+- Auto mode acts only on labels from an `https://` eBay origin (`ebay.com`
+  or a subdomain). That can be the download link itself, the origin inside a
+  `blob:` link, or the page that made a `data:` link. These are exact host
+  checks, so another site that names its file `eBay_label.pdf` is not
+  auto-processed. A `blob:` label is read only from a page whose origin is
+  that blob's origin. A redirect away from eBay during the re-download is
+  refused.
 - The output is a new PDF that receives only the label itself: the 4x6
   form object and its fonts and images. Annotations, page actions,
   JavaScript, form fields and open actions in the source cannot reach it.

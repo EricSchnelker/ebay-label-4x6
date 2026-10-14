@@ -101,6 +101,62 @@ const label = fs.readFileSync(fixture);
     if (!item) throw new Error("auto-convert produced no download");
     fs.copyFileSync(item.filename, path.join(outDir, "auto_out.pdf"));
     console.log("ok auto-convert saved a converted copy");
+
+    // 4. The REAL eBay flow (found 2026-10-14 on a live label): the print page
+    // builds the PDF in-page and Chrome downloads it from a blob: URL such as
+    // blob:https://www.ebay.com/<uuid>. The worker cannot fetch a page's blob,
+    // so it must read it through the eBay tab that owns it. Build exactly that:
+    // a routed www.ebay.com page holding a blob: label.
+    await ctx.route("https://www.ebay.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "text/html", body: "<title>print</title>" }));
+    const ebay = await ctx.newPage();
+    await ebay.goto("https://www.ebay.com/ship/single/print/e2e");
+    const blobUrl = await ebay.evaluate((b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    }, labelB64);
+    if (!blobUrl.startsWith("blob:https://www.ebay.com/")) throw new Error("bad blob url " + blobUrl);
+    const before = await sw.evaluate(async (id) =>
+      (await chrome.downloads.search({})).filter((x) => x.byExtensionId === id).length, extId);
+    await sw.evaluate(async (u) => {
+      const realSearch = chrome.downloads.search;
+      chrome.downloads.search = async () => [{ id: 4343, filename: "/dl/eBay_label_blob.pdf", url: u, finalUrl: u }];
+      try { await handleComplete(4343); } finally { chrome.downloads.search = realSearch; }
+    }, blobUrl);
+    let blobItem = null;
+    const deadline2 = Date.now() + 20000;
+    while (Date.now() < deadline2 && !blobItem) {
+      blobItem = await sw.evaluate(async ({ id, before }) => {
+        const mine = (await chrome.downloads.search({})).filter((x) => x.byExtensionId === id && x.state === "complete");
+        return mine.length > before ? mine[mine.length - 1] : null;
+      }, { id: extId, before });
+      if (!blobItem) await new Promise((r) => setTimeout(r, 500));
+    }
+    if (!blobItem) {
+      const last = await sw.evaluate(async () => (await chrome.storage.local.get("lastAuto")).lastAuto || null);
+      throw new Error("blob: label not auto-converted; lastAuto=" + JSON.stringify(last));
+    }
+    fs.copyFileSync(blobItem.filename, path.join(outDir, "auto_blob_out.pdf"));
+    console.log("ok auto-convert reads a blob: label through its eBay tab");
+
+    // 5. A blob: from any other site must NOT be read, even with the right filename.
+    await ctx.route("https://evil.example/**", (route) =>
+      route.fulfill({ status: 200, contentType: "text/html", body: "<title>x</title>" }));
+    const evil = await ctx.newPage();
+    await evil.goto("https://evil.example/");
+    const evilBlob = await evil.evaluate((b64) => URL.createObjectURL(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))])), labelB64);
+    const countBefore = await sw.evaluate(async (id) =>
+      (await chrome.downloads.search({})).filter((x) => x.byExtensionId === id).length, extId);
+    await sw.evaluate(async (u) => {
+      const realSearch = chrome.downloads.search;
+      chrome.downloads.search = async () => [{ id: 4444, filename: "/dl/eBay_label_evil.pdf", url: u, finalUrl: u }];
+      try { await handleComplete(4444); } finally { chrome.downloads.search = realSearch; }
+    }, evilBlob);
+    await new Promise((r) => setTimeout(r, 1500));
+    const countAfter = await sw.evaluate(async (id) =>
+      (await chrome.downloads.search({})).filter((x) => x.byExtensionId === id).length, extId);
+    if (countAfter !== countBefore) throw new Error("converted a blob: from a non-eBay site");
+    console.log("ok auto-convert ignores blob: labels from other sites");
   } finally {
     await ctx.close();
   }
