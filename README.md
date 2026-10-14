@@ -38,10 +38,12 @@ there.
 downloading and save the 4x6 copy), `notifications` (to tell you when
 auto-convert needs a hand), `storage` (the on/off setting and the last
 auto-convert result), `scripting` and host access to `https://*.ebay.com/*`
-only. An extension can't read files from disk, so it re-reads the label from
-where it came from. eBay's print page builds the PDF inside the page (a
-`blob:` link), and only that eBay tab can read it back. The extension makes
-no other network requests and reads no other sites.
+only. An extension can't read files from disk. eBay's print page builds the
+label PDF inside the page (a `blob:` link), so the extension copies the label
+at the moment eBay creates it. That copy is held in memory until the
+download finishes, then converted and thrown away. It works even if you've
+already closed the eBay tab. The extension makes no network requests of its
+own beyond re-reading a label from eBay, and reads no other sites.
 
 The converter page shows the result of the last auto-convert, so if one
 fails you can see why.
@@ -120,6 +122,12 @@ steps below.
   auto-processed. A `blob:` label is read only from a page whose origin is
   that blob's origin. A redirect away from eBay during the re-download is
   refused.
+- The page hook on eBay pages is a tiny wrapper around
+  `URL.createObjectURL`. It always calls the original and returns its result
+  unchanged, so it can't alter or break the page. A captured copy is used
+  only if that exact `blob:` link is then downloaded under an
+  `eBay_label*.pdf` name. Copies stay in session memory only (never written
+  to disk), at most 20 for at most 2 hours.
 - The output is a new PDF that receives only the label itself: the 4x6
   form object and its fonts and images. Annotations, page actions,
   JavaScript, form fields and open actions in the source cannot reach it.

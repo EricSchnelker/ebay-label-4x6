@@ -11,9 +11,12 @@
  *   https://*.ebay.com/...      -> fetched again (your eBay cookies apply)
  *   blob:https://*.ebay.com/... -> THE REAL EBAY CASE (found on a live label,
  *        2026-10-14): the print page builds the PDF in-page and Chrome
- *        downloads it from a blob: URL. A blob belongs to the page that made
- *        it, so the worker cannot fetch it; it is read through that eBay tab
- *        with chrome.scripting (needs the "scripting" permission).
+ *        downloads it from a blob: URL. A blob dies with its page, so
+ *        page_hook.js copies the label the moment eBay CREATES it and the
+ *        copy waits here ("captured", keyed by blob URL) for that download.
+ *        Works even if the tab is closed by then. Only if no copy exists
+ *        (extension installed after the page loaded) is the blob read back
+ *        through its tab with chrome.scripting.
  *   data:application/pdf...     -> decoded directly, only when the download's
  *        referrer is an eBay page.
  * If none works (tab closed, link expired), a notification offers the
@@ -121,10 +124,53 @@ async function readBlobViaTab(src, origin) {
   throw new Error("the eBay tab that made this label is gone or no longer has it");
 }
 
+// --- Labels captured at creation by page_hook.js / page_bridge.js ---------
+// Kept in chrome.storage.session (memory only, cleared when the browser
+// closes; survives the worker sleeping). Bounded: newest 20, 2 hours max.
+const CAPTURE_MAX = 20;
+const CAPTURE_TTL_MS = 2 * 60 * 60 * 1000;
+
+async function loadCaptured() {
+  const { captured = {} } = await chrome.storage.session.get("captured");
+  const now = Date.now();
+  for (const [k, v] of Object.entries(captured)) if (now - v.at > CAPTURE_TTL_MS) delete captured[k];
+  return captured;
+}
+
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  // Only our own bridge on a real eBay tab, and only for that page's own blob.
+  if (!msg || msg.type !== "label-blob" || !sender.tab || !sender.url || !isEbayUrl(sender.url)) return;
+  const origin = new URL(sender.url).origin;
+  if (typeof msg.url !== "string" || !msg.url.startsWith("blob:" + origin + "/")) return;
+  if (typeof msg.b64 !== "string" || msg.b64.length > Label4x6.MAX_INPUT_BYTES * 1.4) return;
+  (async () => {
+    const captured = await loadCaptured();
+    captured[msg.url] = { b64: msg.b64, at: Date.now() };
+    const keys = Object.keys(captured).sort((a, b) => captured[b].at - captured[a].at);
+    for (const k of keys.slice(CAPTURE_MAX)) delete captured[k];
+    await chrome.storage.session.set({ captured });
+  })().catch((e) => console.error("eBay Label 4x6: capture", e));
+});
+
+/** The captured copy of a blob URL, waiting briefly for an in-flight capture. */
+async function takeCaptured(src) {
+  for (let i = 0; i < 15; i++) { // up to ~3 s: the hand-off may still be on its way
+    const captured = await loadCaptured();
+    if (captured[src]) {
+      const { b64 } = captured[src];
+      delete captured[src];
+      await chrome.storage.session.set({ captured });
+      return fromBase64(b64);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return null;
+}
+
 /** Bytes of the downloaded label, by where it came from (see top). */
 async function getLabelBytes(item, origin) {
   const src = item.finalUrl || item.url;
-  if (src.startsWith("blob:")) return readBlobViaTab(src, origin);
+  if (src.startsWith("blob:")) return (await takeCaptured(src)) || readBlobViaTab(src, origin);
   if (src.startsWith("data:")) {
     const resp = await fetch(src);
     return new Uint8Array(await resp.arrayBuffer());

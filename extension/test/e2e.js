@@ -104,9 +104,11 @@ const label = fs.readFileSync(fixture);
 
     // 4. The REAL eBay flow (found 2026-10-14 on a live label): the print page
     // builds the PDF in-page and Chrome downloads it from a blob: URL such as
-    // blob:https://www.ebay.com/<uuid>. The worker cannot fetch a page's blob,
-    // so it must read it through the eBay tab that owns it. Build exactly that:
-    // a routed www.ebay.com page holding a blob: label.
+    // blob:https://www.ebay.com/<uuid>. The extension's page hook copies the
+    // label the moment the page creates that blob, so the conversion must work
+    // EVEN AFTER THE EBAY TAB IS CLOSED (Eric: needing the tab open "defeats
+    // the point"). Build exactly that, then close the tab before the download
+    // is processed.
     await ctx.route("https://www.ebay.com/**", (route) =>
       route.fulfill({ status: 200, contentType: "text/html", body: "<title>print</title>" }));
     const ebay = await ctx.newPage();
@@ -116,6 +118,9 @@ const label = fs.readFileSync(fixture);
       return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
     }, labelB64);
     if (!blobUrl.startsWith("blob:https://www.ebay.com/")) throw new Error("bad blob url " + blobUrl);
+    // Give the hook -> bridge -> worker hand-off a moment, then close the tab.
+    await new Promise((r) => setTimeout(r, 1500));
+    await ebay.close();
     const before = await sw.evaluate(async (id) =>
       (await chrome.downloads.search({})).filter((x) => x.byExtensionId === id).length, extId);
     await sw.evaluate(async (u) => {
@@ -137,7 +142,7 @@ const label = fs.readFileSync(fixture);
       throw new Error("blob: label not auto-converted; lastAuto=" + JSON.stringify(last));
     }
     fs.copyFileSync(blobItem.filename, path.join(outDir, "auto_blob_out.pdf"));
-    console.log("ok auto-convert reads a blob: label through its eBay tab");
+    console.log("ok auto-convert converts a blob: label after its eBay tab is closed");
 
     // 5. A blob: from any other site must NOT be read, even with the right filename.
     await ctx.route("https://evil.example/**", (route) =>

@@ -41,7 +41,7 @@ def test_extension_in_chromium(tmp_path):
                        cwd=ROOT, capture_output=True, text=True, timeout=180, env=dict(os.environ))
     assert r.returncode == 0, r.stdout + r.stderr
     for step in ("extension loaded", "converter page", "ignores non-eBay", "saved a converted copy",
-                 "reads a blob: label through its eBay tab", "ignores blob: labels from other sites"):
+                 "converts a blob: label after its eBay tab is closed", "ignores blob: labels from other sites"):
         assert step in r.stdout, r.stdout
     _assert_upright_pages(tmp_path / "page_combined.pdf", 2)
     _assert_upright_pages(tmp_path / "auto_out.pdf", 1)
