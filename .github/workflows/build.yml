@@ -1,10 +1,13 @@
 name: build
 
-# test   -> pytest on Windows / macOS / Linux x Python 3.10 + 3.13
-# build  -> PyInstaller once per OS (it cannot cross-compile), then smoke-run
-#           the real binary on a synthetic label
-# release (v* tags only) -> one GitHub release with all three binaries and
-#           SHA256SUMS.txt
+# test      -> pytest on Windows / macOS / Linux x Python 3.10 + 3.13
+#              (includes the extension's converter under Node)
+# extension -> the Chrome extension loaded into real Chromium (Playwright),
+#              then zipped for release
+# build     -> PyInstaller once per OS (it cannot cross-compile), then
+#              smoke-run the real binary on a synthetic label
+# release (v* tags only) -> one GitHub release: three desktop builds, the
+#              extension zip and SHA256SUMS.txt
 #
 # Security notes:
 # * Default token is READ-ONLY; only the release job gets contents: write,
@@ -44,8 +47,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - run: pip install -r requirements-build.txt
       - run: python -m pytest -q
+
+  extension:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements-build.txt
+      - name: install Playwright + Chromium (test-only; not shipped)
+        run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
+      - name: extension tests (Node + real Chromium)
+        run: python -m pytest -q tests/test_extension.py tests/test_extension_e2e.py -rs
+      - name: package extension
+        # Ship only what the extension runs: no test/ harness.
+        run: cd extension && zip -r -X ../eBayLabel4x6-chrome-extension.zip . -x "test/*"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eBayLabel4x6-chrome-extension.zip
+          path: eBayLabel4x6-chrome-extension.zip
+          if-no-files-found: error
 
   build:
     needs: test
@@ -141,7 +174,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, extension]
     runs-on: ubuntu-latest
     permissions:
       contents: write

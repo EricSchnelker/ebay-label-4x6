@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eBay Label 4x6</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --fg: #1d2330; --muted: #5b6475; --line: #d5dae3; --accent: #0064c8; --bad: #b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --card: #1d2129; --fg: #e8ebf0; --muted: #9aa3b2; --line: #333a46; --accent: #5aa9ff; --bad: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+  main { max-width: 640px; margin: 48px auto; padding: 0 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  #drop { display: block; border: 2px dashed var(--line); border-radius: 12px; background: var(--card);
+          padding: 40px 16px; text-align: center; cursor: pointer; }
+  #drop.over { border-color: var(--accent); }
+  #drop strong { color: var(--accent); }
+  #files { position: absolute; left: -9999px; }
+  .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+  label.opt { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+  #status { white-space: pre-wrap; min-height: 1.5em; }
+  #status.bad { color: var(--bad); }
+  .note { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>eBay Label 4x6</h1>
+  <p class="sub">Turns eBay's sideways letter-size label into an upright 4x6 PDF. Everything happens on this computer; nothing is uploaded.</p>
+
+  <label id="drop" for="files">
+    <strong>Drop eBay label PDFs here</strong><br>or click to choose. Pick several to combine them.
+  </label>
+  <input id="files" type="file" accept="application/pdf,.pdf" multiple>
+
+  <div class="row">
+    <label class="opt"><input id="combine" type="checkbox" checked> Combine several labels into one PDF</label>
+    <label class="opt"><input id="auto" type="checkbox"> Auto-convert eBay labels when they download</label>
+  </div>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <p class="note">Print the result at <b>Actual size / 100%</b>, not "Fit to page", on 4x6 label stock.</p>
+</main>
+<script src="vendor/pdf-lib.min.js"></script>
+<script src="label4x6.js"></script>
+<script src="convert.js"></script>
+</body>
+</html>

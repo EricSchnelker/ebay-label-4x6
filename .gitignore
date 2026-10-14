@@ -6,3 +6,5 @@ dist/
 *.spec
 # Never commit real labels: they carry buyers' names and home addresses.
 *.pdf
+node_modules/
+package-lock.json

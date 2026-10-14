@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "eBay Label 4x6",
+  "version": "1.0.0",
+  "description": "Turns eBay's sideways letter-size shipping label PDF into an upright 4x6 for thermal printers. Fully offline.",
+  "permissions": ["downloads", "notifications", "storage"],
+  "host_permissions": ["https://*.ebay.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "eBay Label 4x6: convert / combine labels" },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  }
+}

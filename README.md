@@ -8,9 +8,40 @@ This tool turns it into a proper **upright 4x6 PDF** with the barcodes at
 their original size. It can also combine a batch of labels into **one**
 multi-page PDF so you can print them all at once.
 
-It runs entirely on your computer. Nothing is uploaded and nothing goes over the network.
+It comes as a **Chrome extension** (any OS, converts at the moment of
+download) and a **desktop app** for Windows, macOS and Linux. Both run
+entirely on your computer. Nothing is uploaded.
 
-## Download
+## Chrome extension (recommended)
+
+Works in Chrome, Edge, Brave and other Chromium browsers on any OS.
+
+1. Download `eBayLabel4x6-chrome-extension.zip` from the
+   [latest release](../../releases/latest) and unzip it.
+2. Open `chrome://extensions`, switch on **Developer mode** (top right),
+   click **Load unpacked**, and pick the unzipped folder.
+
+Then:
+
+- **Automatic.** When you download a label from eBay (`eBay_label_*.pdf`),
+  the extension saves an upright `eBay_label_*_4x6.pdf` next to it in
+  Downloads. You can turn this off on the converter page.
+- **Converter page.** Click the extension's toolbar icon. Drop one or more
+  label PDFs on the page and you get them back as 4x6. Several at once are
+  combined into one PDF by default.
+
+If the automatic copy can't be made (for example, the eBay link has already
+expired), a notification opens the converter page so you can drop the file
+there.
+
+**Permissions and why:** `downloads` (to see when a label finishes
+downloading and save the 4x6 copy), `notifications` (to tell you when
+auto-convert needs a hand), `storage` (the on/off setting), and host access
+to `https://*.ebay.com/*` only (to re-download the label you just
+downloaded; an extension cannot read files from disk). The extension makes
+no other network requests and reads no other sites.
+
+## Desktop app
 
 Grab the build for your system from the
 [latest release](../../releases/latest):
@@ -58,6 +89,8 @@ python ebay_label_4x6.py watch                # watch Downloads in a terminal
 ```
 
 Run the tests with `pip install -r requirements-build.txt && python -m pytest -q`.
+The extension tests need Node. For the browser test, also run
+`npm install --no-save playwright@1.56.1 && npx playwright install chromium`.
 
 ## How it works
 
@@ -72,6 +105,25 @@ Pages that are already 4x6 pass through unchanged, except for the safety
 steps below.
 
 ## Security
+
+### Chrome extension
+
+- Auto mode acts only on downloads that came from an `https://` URL on
+  `ebay.com` or one of its subdomains. That is an exact host check, so
+  another site that names its file `eBay_label.pdf` is not auto-processed.
+  A redirect away from eBay during the re-download is refused.
+- The output is a new PDF that receives only the label itself: the 4x6
+  form object and its fonts and images. Annotations, page actions,
+  JavaScript, form fields and open actions in the source cannot reach it.
+  A PDF that doesn't match eBay's layout is refused, not guessed at.
+- Inputs are capped (25 MB, 500 pages, 1 MB of page content). The page
+  content parser is a small linear tokenizer that gives up on anything
+  unusual.
+- Extension pages run under a strict CSP: `script-src 'self'`, no inline
+  scripts, no remote code. The only library is pdf-lib 1.17.1, vendored
+  with its MIT license.
+
+### Desktop app
 
 The watcher processes any file in Downloads that is *named* like an eBay
 label, and any website can download a file with that name. So every input is
@@ -91,7 +143,9 @@ treated as untrusted:
   `notify-send`, `osascript`) are started with argument lists, never through
   a shell. The Linux autostart entry is escaped per the Desktop Entry spec.
 
-Each limit has a test in `tests/test_hardening.py`. To report a
+Each desktop limit has a test in `tests/test_hardening.py`. The extension's
+equivalents are in `tests/test_extension.py`, and `tests/test_extension_e2e.py`
+loads the extension into real Chromium. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License

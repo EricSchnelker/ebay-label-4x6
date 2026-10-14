@@ -29,33 +29,36 @@ import ebay_label_4x6 as mod  # noqa: E402  (path set up on the line above)
 
 
 def _fake_ebay_label(rotate_deg=-90):
-    """Build a letter sheet with a 6x4 label drawn rotated in its top-left.
+    """Build a letter sheet shaped exactly like eBay's real label PDF.
 
-    rotate_deg=-90 reproduces eBay's real output (cm 0 -1 1 0: text runs
-    DOWN the sheet). +90 is the mirror case, kept so the direction logic is
-    tested both ways rather than hard-coding eBay's current habit.
+    Measured on real eBay labels: the label is ONE form XObject with
+    /BBox [0 0 288 432] (a 4x6 portrait in its own space), and the page
+    content is just   q 0 -1 1 0 90 734.46 cm /Xf1 Do Q   -- the form drawn
+    turned 90 degrees into the top-left of a 612 x 792 sheet, text running
+    DOWN the sheet. That structure matters: the Chrome extension lifts the
+    form out directly, and the desktop converter must cope with it too.
+
+    rotate_deg=-90 reproduces eBay. +90 is the mirror (x-axis pointing UP),
+    kept so the direction logic is tested both ways rather than hard-coding
+    eBay's current habit.
     """
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(612, 792))
+    # The label, in its own upright 4x6 space.
+    c.beginForm("label", 0, 0, 288, 432)
+    c.rect(9, 16, 270, 400, stroke=1, fill=0)   # body, inset like eBay's art
+    c.rect(9, 386, 270, 30, stroke=0, fill=1)   # TOP marker bar
+    c.setFont("Helvetica", 12)
+    c.drawString(29, 216, "USPS GROUND ADVANTAGE")
+    c.endForm()
     c.saveState()
     if rotate_deg == -90:
-        # Same anchor as the real label: origin near the sheet's top-left,
-        # label x-axis pointing down the page.
-        c.translate(90, 734)
+        # eBay's exact matrix: (x, y) -> (y + 90, 734.46 - x).
+        c.transform(0, -1, 1, 0, 90, 734.46)
     else:
-        # Mirror: origin at the bottom of the art, x-axis pointing UP.
-        c.translate(504, 330)
-    c.rotate(rotate_deg)
-    # Label body in its own UPRIGHT coordinates: 270 wide x 400 tall -- a
-    # portrait 4x6 just inside the edge, like eBay's art (274 x 408 measured).
-    # Text runs along the SHORT side; an earlier version of this fake ran it
-    # along the long side, which on the sheet came out portrait and never
-    # exercised the rotation at all.
-    c.rect(0, 0, 270, 400, stroke=1, fill=0)
-    # TOP marker: a thick black bar along the label's top edge.
-    c.rect(0, 370, 270, 30, stroke=0, fill=1)
-    c.setFont("Helvetica", 12)
-    c.drawString(20, 200, "USPS GROUND ADVANTAGE")
+        # Mirror: (x, y) -> (522 - y, x + 60); same footprint, lower on the sheet.
+        c.transform(0, 1, -1, 0, 522, 60)
+    c.doForm("label")
     c.restoreState()
     c.showPage()
     c.save()
