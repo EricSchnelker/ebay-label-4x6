@@ -1,0 +1,7 @@
+# Runtime deps for running from source. Ranges, not pins: a source user gets
+# security fixes. The release binaries use requirements-build.txt (exact pins)
+# so every published build is reproducible.
+pypdf>=6.0,<7
+pypdfium2>=5.0,<6
+pillow>=11.0
+pystray>=0.19.5,<0.20

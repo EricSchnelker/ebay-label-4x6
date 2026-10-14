@@ -1,0 +1,161 @@
+name: build
+
+# test   -> pytest on Windows / macOS / Linux x Python 3.10 + 3.13
+# build  -> PyInstaller once per OS (it cannot cross-compile), then smoke-run
+#           the real binary on a synthetic label
+# release (v* tags only) -> one GitHub release with all three binaries and
+#           SHA256SUMS.txt
+#
+# Security notes:
+# * Default token is READ-ONLY; only the release job gets contents: write,
+#   and it runs only for tags pushed to this repo -- never for pull requests.
+# * Plain `pull_request` (not pull_request_target), so fork PRs run with no
+#   secrets and a read-only token.
+# * No untrusted event text (PR titles, branch names, commit messages) is
+#   interpolated into any `run:`; the tag name reaches the shell via env.
+# * Builds install exact pins from requirements-build.txt.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-build.txt
+      - run: python -m pytest -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04, not latest: a PyInstaller binary needs a glibc at
+          # least as new as the build host's, so the older host runs on more distros.
+          - os: ubuntu-22.04
+            asset: eBayLabel4x6-linux-x86_64.tar.gz
+          - os: windows-latest
+            asset: eBayLabel4x6.exe
+          - os: macos-14
+            asset: eBayLabel4x6-macos-arm64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-build.txt
+
+      # --collect-all pypdfium2*: the PDFium library is package DATA, which
+      #   PyInstaller's import scan misses (the app would start, then fail on
+      #   the first PDF).
+      # --hidden-import pystray._<backend>: pystray picks its backend by name
+      #   at runtime, so the scan never sees it.
+      - name: build (Linux)
+        if: runner.os == 'Linux'
+        run: >
+          pyinstaller -y --onefile --name eBayLabel4x6
+          --collect-all pypdfium2 --collect-all pypdfium2_raw
+          --hidden-import pystray._xorg --hidden-import pystray._appindicator
+          ebay_label_4x6_app.py
+      - name: build (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          pyinstaller -y --onefile --noconsole --name eBayLabel4x6
+          --collect-all pypdfium2 --collect-all pypdfium2_raw
+          --hidden-import pystray._win32
+          ebay_label_4x6_app.py
+      - name: build (macOS)
+        # --argv-emulation: Finder delivers dropped files as Apple Events,
+        # not argv; this turns them into argv so drop-to-convert works.
+        if: runner.os == 'macOS'
+        run: >
+          pyinstaller -y --windowed --argv-emulation --name eBayLabel4x6
+          --osx-bundle-identifier io.github.ebaylabel4x6
+          --collect-all pypdfium2 --collect-all pypdfium2_raw
+          --hidden-import pystray._darwin
+          ebay_label_4x6_app.py
+
+      - name: make a synthetic label
+        run: python -c "import sys; sys.path.insert(0, 'tests'); import test_ebay_label_4x6 as t; open('eBay_label_smoke.pdf', 'wb').write(t._fake_ebay_label())"
+
+      - name: smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: ./dist/eBayLabel4x6 combine eBay_label_smoke.pdf eBay_label_smoke.pdf -o smoke_out.pdf
+      - name: smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: ./dist/eBayLabel4x6.app/Contents/MacOS/eBayLabel4x6 combine eBay_label_smoke.pdf eBay_label_smoke.pdf -o smoke_out.pdf
+      - name: smoke test (Windows)
+        # Windowed exe: Start-Process -Wait so the step waits for it to exit.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\eBayLabel4x6.exe -ArgumentList 'combine','eBay_label_smoke.pdf','eBay_label_smoke.pdf','-o','smoke_out.pdf' -Wait -PassThru
+          if (-not (Test-Path smoke_out.pdf)) { Get-Content "$env:LOCALAPPDATA\eBayLabel4x6\log.txt" -ErrorAction SilentlyContinue; throw "exe produced no output (exit $($p.ExitCode))" }
+      - name: check smoke output
+        run: python -c "from pypdf import PdfReader as R; r = R('smoke_out.pdf'); p = r.pages[0]; assert len(r.pages) == 2 and (round(float(p.mediabox.width)), round(float(p.mediabox.height))) == (288, 432), 'bad output'; print('smoke ok')"
+
+      - name: package (Linux)
+        # tar keeps the executable bit, which a plain download would lose.
+        if: runner.os == 'Linux'
+        run: chmod +x dist/eBayLabel4x6 && tar -C dist -czf ${{ matrix.asset }} eBayLabel4x6
+      - name: package (macOS)
+        # ditto keeps the bundle's symlinks and metadata; plain zip can break it.
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/eBayLabel4x6.app ${{ matrix.asset }}
+      - name: package (Windows)
+        if: runner.os == 'Windows'
+        run: Copy-Item dist\eBayLabel4x6.exe ${{ matrix.asset }}
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: checksums
+        working-directory: out
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" out/* --title "$TAG" --generate-notes
