@@ -6,8 +6,10 @@ name: build
 #              then zipped for release
 # build     -> PyInstaller once per OS (it cannot cross-compile), then
 #              smoke-run the real binary on a synthetic label
-# release (v* tags only) -> one GitHub release: three desktop builds, the
-#              extension zip and SHA256SUMS.txt
+# release   -> one GitHub release: three desktop builds, the extension zip and
+#              SHA256SUMS.txt. Runs for a pushed v* tag, OR from the Actions
+#              tab ("Run workflow", version vX.Y.Z), which creates the tag on
+#              the commit it built -- for when pushing a tag is not possible.
 #
 # Security notes:
 # * Default token is READ-ONLY; only the release job gets contents: write,
@@ -24,6 +26,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to tag and publish, e.g. v1.0.1 (blank = build only)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -173,7 +180,9 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Pushed v* tag, or a manual run with a version. workflow_dispatch can only
+    # be started by someone with write access to this repo.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
     needs: [build, extension]
     runs-on: ubuntu-latest
     permissions:
@@ -190,5 +199,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" out/* --title "$TAG" --generate-notes
+          # Tag name from the pushed tag, or the manual input. Passed via env and
+          # validated below -- never interpolated into the script itself.
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "refusing: version '$TAG' is not vMAJOR.MINOR.PATCH" >&2; exit 1
+          fi
+          # --target: for a manual run the tag does not exist yet; gh creates it
+          # on exactly the commit this run built and tested.
+          gh release create "$TAG" out/* --title "$TAG" --generate-notes --target "$SHA"
