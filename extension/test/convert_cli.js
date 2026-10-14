@@ -13,6 +13,19 @@ if (args[0] === "--names") {
   process.exit(0);
 }
 const [out, ...inputs] = args;
+// Always report this process's own peak memory (KB) on stderr, so tests can
+// prove a hostile input was refused WITHOUT being inflated. On Linux this
+// reads VmHWM: getrusage's maxrss (process.resourceUsage().maxRSS) SURVIVES
+// exec, so a Node launched by a big Python test process would inherit the
+// parent's peak and hide the very growth we are measuring.
+function peakKb() {
+  try {
+    const m = /VmHWM:\s+(\d+)\s+kB/.exec(fs.readFileSync("/proc/self/status", "utf8"));
+    if (m) return Number(m[1]);
+  } catch (_) { /* not Linux */ }
+  return process.resourceUsage().maxRSS;
+}
+const reportRss = () => console.error("maxrss_kb=" + peakKb());
 L.convert(inputs.map((p) => fs.readFileSync(p)))
-  .then((bytes) => fs.writeFileSync(out, bytes))
-  .catch((e) => { console.error("ERROR: " + e.message); process.exit(2); });
+  .then((bytes) => { fs.writeFileSync(out, bytes); reportRss(); })
+  .catch((e) => { console.error("ERROR: " + e.message); reportRss(); process.exit(2); });

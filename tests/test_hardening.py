@@ -130,3 +130,95 @@ def test_planted_symlink_at_output_is_replaced_not_followed(tmp_path):
     dst = core.convert_file(str(src))
     assert victim.read_text() == "keep me"
     assert not os.path.islink(dst) and PdfReader(dst).pages
+
+
+# --- Decompression bombs -----------------------------------------------------
+# Found 2026-10 by adversarial review: a 600 KB file whose content stream
+# inflates to 600 MB drove the desktop converter to a 1.27 GB peak (12 s).
+# The watcher would do that on its own to any "eBay_label*.pdf" a website
+# drops into Downloads. Each test runs the converter in a fresh process and
+# reads its peak memory (VmHWM) so an inflate cannot hide.
+
+import subprocess
+import zlib
+
+from pypdf.generic import DictionaryObject as _D, NumberObject, StreamObject
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _flate_bomb_stream(mb):
+    co = zlib.compressobj(9)
+    chunk = b" " * (1 << 20)
+    s = StreamObject()
+    s._data = b"".join(co.compress(chunk) for _ in range(mb)) + co.flush()
+    s[NameObject("/Filter")] = NameObject("/FlateDecode")
+    return s
+
+
+def _bomb_pdf(where, mb=600):
+    w = PdfWriter()
+    page = w.add_blank_page(612, 792)
+    if where == "content":
+        page[NameObject("/Contents")] = w._add_object(_flate_bomb_stream(mb))
+    elif where == "form":
+        # Bomb hidden one level down, inside a form XObject the page draws.
+        form = _flate_bomb_stream(mb)
+        form.update({NameObject("/Type"): NameObject("/XObject"),
+                     NameObject("/Subtype"): NameObject("/Form"),
+                     NameObject("/BBox"): ArrayObject([NumberObject(0), NumberObject(0),
+                                                       NumberObject(288), NumberObject(432)])})
+        page[NameObject("/Resources")] = _D({NameObject("/XObject"): _D({NameObject("/F"): w._add_object(form)})})
+        draw = StreamObject()
+        draw._data = b"q 0 -1 1 0 90 734 cm /F Do Q"
+        page[NameObject("/Contents")] = w._add_object(draw)
+    elif where == "image":
+        # A tiny stream claiming a 100000 x 100000 px image: the renderer
+        # would allocate for the declared size.
+        img = StreamObject()
+        img._data = zlib.compress(b"\x00" * 1024)
+        img.update({NameObject("/Type"): NameObject("/XObject"), NameObject("/Subtype"): NameObject("/Image"),
+                    NameObject("/Width"): NumberObject(100000), NameObject("/Height"): NumberObject(100000),
+                    NameObject("/ColorSpace"): NameObject("/DeviceGray"),
+                    NameObject("/BitsPerComponent"): NumberObject(8),
+                    NameObject("/Filter"): NameObject("/FlateDecode")})
+        page[NameObject("/Resources")] = _D({NameObject("/XObject"): _D({NameObject("/I"): w._add_object(img)})})
+        draw = StreamObject()
+        draw._data = b"q 612 0 0 792 0 0 cm /I Do Q"
+        page[NameObject("/Contents")] = w._add_object(draw)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def _convert_in_child(path):
+    code = (
+        "import re, sys; sys.path.insert(0, %r)\n"
+        "import ebay_label_4x6 as m\n"
+        "try:\n    m.convert_file(%r); print('RESULT converted')\n"
+        "except ValueError as e:\n    print('RESULT refused', e)\n"
+        "print('PEAK_KB', re.search(r'VmHWM:\\s+(\\d+)', open('/proc/self/status').read()).group(1))\n"
+    ) % (ROOT, str(path))
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    out = r.stdout
+    assert "PEAK_KB" in out, r.stdout + r.stderr
+    return out.split("RESULT ")[1].splitlines()[0], int(out.split("PEAK_KB ")[1].split()[0]) / 1024
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="peak memory via /proc (VmHWM)")
+@pytest.mark.parametrize("where", ["content", "form", "image"])
+def test_decompression_bomb_refused_without_inflating(tmp_path, where):
+    p = tmp_path / f"eBay_label_{where}.pdf"
+    p.write_bytes(_bomb_pdf(where))
+    assert p.stat().st_size < 2 * 1024 * 1024
+    result, peak_mb = _convert_in_child(p)
+    assert result.startswith("refused"), result
+    assert peak_mb < 250, f"{where} bomb: peak {peak_mb:.0f} MB"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="peak memory via /proc (VmHWM)")
+def test_real_shaped_label_still_converts_under_the_budget(tmp_path):
+    p = tmp_path / "eBay_label_ok.pdf"
+    p.write_bytes(_fake_ebay_label())
+    result, _ = _convert_in_child(p)
+    assert result == "converted"

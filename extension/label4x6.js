@@ -51,6 +51,12 @@
   // A real eBay page stream is ~60 bytes. 1 MB of top-level content means
   // this is not an eBay label; stop before tokenizing it.
   const MAX_CONTENT_BYTES = 1024 * 1024;
+  // ...and that check alone runs too late: decodePDFRawStream inflates the
+  // whole stream first, so a 60 KB Flate "bomb" became 60 MB in memory before
+  // being refused (caught by test_extension_refuses_content_bomb_*). Flate
+  // expands at most ~1032:1, so capping the ENCODED size at 16 KB bounds the
+  // inflate at ~16 MB. eBay's real page stream is ~60 bytes.
+  const MAX_ENCODED_CONTENT = 16 * 1024;
 
   // ---------------------------------------------------------------- helpers
 
@@ -75,6 +81,7 @@
     let total = 0;
     for (const s of streams) {
       if (!(s instanceof PDFRawStream)) return null;
+      if (s.contents.length > MAX_ENCODED_CONTENT) return null; // before decoding
       const bytes = decodePDFRawStream(s).decode();
       total += bytes.length + 1;
       if (total > MAX_CONTENT_BYTES) return null;

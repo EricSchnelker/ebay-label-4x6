@@ -116,9 +116,11 @@ steps below.
   form object and its fonts and images. Annotations, page actions,
   JavaScript, form fields and open actions in the source cannot reach it.
   A PDF that doesn't match eBay's layout is refused, not guessed at.
-- Inputs are capped (25 MB, 500 pages, 1 MB of page content). The page
-  content parser is a small linear tokenizer that gives up on anything
-  unusual.
+- Inputs are capped (25 MB, 500 pages). Page content is size-checked
+  *before* it is decompressed: at most 16 KB compressed, and 1 MB once
+  decompressed. A small file built to inflate to a huge size (a "zip bomb")
+  is refused without being expanded. The page content parser is a small
+  linear tokenizer that gives up on anything unusual.
 - Extension pages run under a strict CSP: `script-src 'self'`, no inline
   scripts, no remote code. The only library is pdf-lib 1.17.1, vendored
   with its MIT license.
@@ -132,6 +134,12 @@ treated as untrusted:
 - **Size limits**: 25 MB per file, 500 pages, and 2000 pt per page side.
   The page limit is checked before rendering, so an oversized page cannot
   exhaust memory.
+- **Decompression bombs**: before rendering, every stream the page uses
+  (content, nested forms, images, fonts) is measured with a capped streaming
+  decompressor. Nothing is fully decompressed during this check. Pages over
+  64 MB decoded, or images over 50 megapixels, are refused. Before this
+  check, a 600 KB test file reached 1.27 GB of memory. It is now refused in
+  0.25 s.
 - **Active content is stripped**: page actions, annotations, links,
   JavaScript and form fields never reach the output. The output is a fresh
   PDF that contains only page content. This applies even to files that are

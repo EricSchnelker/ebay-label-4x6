@@ -40,10 +40,13 @@ import os
 import sys
 import tempfile
 import time
+import zlib
 
 import pypdfium2
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import ContentStream, NameObject, RectangleObject
+from pypdf.generic import (ArrayObject, ContentStream, DictionaryObject,
+                           IndirectObject, NameObject, RectangleObject,
+                           StreamObject)
 
 # 4 x 6 in at 72 pt/in. Portrait is what a 4x6 thermal printer feeds.
 LABEL_W, LABEL_H = 288, 432
@@ -78,6 +81,24 @@ MAX_PAGES = 500
 # render at 4 Mpx / ~4 MB grayscale. Without it a 20000 x 20000 pt page made
 # the renderer chew through a 400 Mpx bitmap (36 s in the test, then OOM).
 MAX_PAGE_PT = 2000
+
+# Decompression-bomb budget, checked BEFORE PDFium renders the page.
+# Found by adversarial review: a 600 KB file whose content stream inflates to
+# 600 MB drove PDFium to a 1.27 GB peak. (pypdf caps each stream it decodes at
+# 75 MB itself; PDFium has no such cap, and it decodes everything the page
+# draws.) So every stream reachable from the page -- content, nested form
+# XObjects, images, fonts -- is measured with a capped streaming inflate,
+# never fully decompressed. A real eBay label decodes to ~1 MB in total.
+MAX_PAGE_DECODED_BYTES = 64 * 1024 * 1024
+# Declared image size: PDFium allocates for /Width x /Height whatever the
+# data says, so a 1 KB stream can claim 100000 x 100000 px. 50 Mpx is a
+# 7000 x 7000 image -- far above any label's barcode/logo bitmaps.
+MAX_IMAGE_PIXELS = 50_000_000
+# Object-graph walk limits (a crafted file can nest forms or loop refs).
+MAX_STREAMS_PER_PAGE = 5000
+# Worst-case expansion for filters we do not measure exactly: RunLength can
+# grow 128x and LZW a few hundred x, so they are charged pessimistically.
+FILTER_EXPANSION = {"/RunLengthDecode": 128, "/RL": 128, "/LZWDecode": 512, "/LZW": 512}
 
 # Page keys that carry ACTIVE content: /AA = page open/close actions,
 # /Annots = links, widgets, JavaScript-bearing annotations. A shipping label
@@ -173,6 +194,79 @@ def _check_page(page):
         raise ValueError(f"page too large ({w:.0f} x {h:.0f} pt; limit {MAX_PAGE_PT})")
 
 
+def _flate_len_capped(raw, cap):
+    """Length `raw` inflates to, reading at most cap+1 bytes of output.
+
+    zlib's max_length bounds each step, so memory stays ~64 KB per step no
+    matter how hostile the stream is. Returns cap+1 when over budget, and the
+    bytes seen so far for a truncated/corrupt stream (PDFium would stop there too).
+    """
+    d = zlib.decompressobj()
+    total, data = 0, raw
+    try:
+        while data and total <= cap:
+            out = d.decompress(data, 65536)
+            total += len(out)
+            data = d.unconsumed_tail
+            if not out and not data:
+                break
+    except zlib.error:
+        pass
+    return total
+
+
+def _stream_decoded_len(stream, cap):
+    """Upper bound on what one stream decodes to, without materialising it."""
+    raw = stream._data or b""
+    filters = stream.get("/Filter")
+    if filters is None:
+        return len(raw)
+    if not isinstance(filters, ArrayObject):
+        filters = [filters]
+    names = [str(f) for f in filters]
+    first = names[0]
+    if first in ("/FlateDecode", "/Fl"):
+        # Exact measurement of the dangerous step; any later filter in the
+        # chain is a decoder PDFium hands this output to (e.g. DCT), charged 1x.
+        return _flate_len_capped(raw, cap)
+    # ASCII85/ASCIIHex shrink; image codecs (DCT/JPX/JBIG2/CCITT) are bounded
+    # by the declared image size, checked separately. Others: pessimistic.
+    return len(raw) * max([FILTER_EXPANSION.get(n, 1) for n in names] + [1])
+
+
+def _check_streams(page):
+    """Refuse a page whose streams would decode past the budget (see top)."""
+    budget = MAX_PAGE_DECODED_BYTES
+    seen = set()
+    stack = [page]
+    visited = 0
+    while stack:
+        obj = stack.pop()
+        if isinstance(obj, IndirectObject):
+            key = (obj.idnum, obj.generation)
+            if key in seen:
+                continue  # shared or looping reference: count once
+            seen.add(key)
+            obj = obj.get_object()
+        visited += 1
+        if visited > MAX_STREAMS_PER_PAGE * 4:
+            raise ValueError("page structure too large")
+        if isinstance(obj, StreamObject):
+            if obj.get("/Subtype") == "/Image":
+                w, h = int(obj.get("/Width", 0) or 0), int(obj.get("/Height", 0) or 0)
+                if w < 0 or h < 0 or w * h > MAX_IMAGE_PIXELS:
+                    raise ValueError(f"image too large ({w} x {h} px)")
+            budget -= _stream_decoded_len(obj, budget)
+            if budget < 0:
+                raise ValueError("page decodes to too much data (possible decompression bomb)")
+        if isinstance(obj, DictionaryObject):  # includes StreamObject's dict
+            for k, v in obj.items():
+                if k != "/Parent":  # never walk up into the page tree
+                    stack.append(v)
+        elif isinstance(obj, ArrayObject):
+            stack.extend(obj)
+
+
 def _sanitize_page(page):
     """Strip active content from a page in place (see ACTIVE_PAGE_KEYS).
 
@@ -189,6 +283,7 @@ def _sanitize_page(page):
 def _fix_page(page):
     """Sanitize + crop + rotate one page in place; returns a 4x6 portrait page."""
     _check_page(page)
+    _check_streams(page)
     _sanitize_page(page)
     if _is_4x6(page):
         return page

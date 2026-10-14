@@ -98,3 +98,47 @@ def test_extension_names():
     got = json.loads(r.stdout)
     assert got == [[True, "eBay_label_01-2_4x6.pdf"], [True, "EBAY_LABEL_x_4x6.pdf"],
                    [False, "eBay_label_01-2_4x6_4x6.pdf"], [False, "invoice_4x6.pdf"]]
+
+
+def _content_bomb():
+    """A letter page whose content stream is ~60 KB of Flate that inflates to
+    60 MB of spaces -- a decompression bomb aimed at the content parser."""
+    import zlib
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, NameObject, StreamObject
+    w = PdfWriter()
+    page = w.add_blank_page(612, 792)
+    raw = b" " * (60 * 1024 * 1024)
+    s = StreamObject()
+    s._data = zlib.compress(raw, 9)
+    s[NameObject("/Filter")] = NameObject("/FlateDecode")
+    page[NameObject("/Contents")] = w._add_object(s)
+    import io as _io
+    buf = _io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def _node_peak_mb(stderr):
+    import re
+    m = re.search(r"maxrss_kb=(\d+)", stderr)
+    assert m, stderr
+    return int(m.group(1)) / 1024
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="exact peak memory via /proc (VmHWM)")
+def test_extension_refuses_content_bomb_without_inflating(tmp_path):
+    bomb = _content_bomb()
+    assert len(bomb) < 200 * 1024  # small on disk...
+    # Baseline: the SAME refusal path on a harmless letter page. (A successful
+    # conversion is no baseline: pdf-lib's save alone peaks ~115 MB.)
+    r_ok, _ = _run(tmp_path, _blank(612, 792))
+    assert r_ok.returncode == 2, r_ok.stderr
+    baseline = _node_peak_mb(r_ok.stderr)
+    r, _ = _run(tmp_path, bomb)
+    # ...refused as not-an-eBay-label, and WITHOUT inflating the 60 MB: the
+    # converter's own peak stays within 30 MB of refusing a harmless page
+    # (measured: ~57 vs ~57 MB fixed; ~126 MB when the bomb was inflated).
+    assert r.returncode == 2 and "does not look like an eBay label" in r.stderr, r.stderr
+    peak = _node_peak_mb(r.stderr)
+    assert peak < baseline + 30, f"peak {peak:.0f} MB vs baseline {baseline:.0f} MB: the bomb was inflated"
