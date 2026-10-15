@@ -180,6 +180,7 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 
 The tool is free and open source. If it saves you time, tips are welcome:
 
+- [Buy Me a Coffee](https://buymeacoffee.com/cardprices)
 - [GitHub Sponsors](https://github.com/sponsors/EricSchnelker)
 
 ## License

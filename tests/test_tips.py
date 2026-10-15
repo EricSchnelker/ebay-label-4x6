@@ -42,6 +42,8 @@ def test_tips_shown_everywhere_from_the_same_list():
     for t in tips:
         assert t["url"] in readme, f"README is missing {t['url']}"
     assert "github: [EricSchnelker]" in funding
+    # Buy Me a Coffee: the account already live on card-prices.com/about.
+    assert "buy_me_a_coffee: cardprices" in funding
     # The converter page renders the list from tips.json, never a hardcoded copy.
     page_js = open(os.path.join(ROOT, "extension", "convert.js"), encoding="utf-8").read()
     assert "tips.json" in page_js

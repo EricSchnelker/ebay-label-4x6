@@ -1,3 +1,4 @@
 # Shows the "Sponsor" button on the GitHub repo. Keep in step with
 # extension/tips.json (tests/test_tips.py checks both).
 github: [EricSchnelker]
+buy_me_a_coffee: cardprices
