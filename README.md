@@ -14,7 +14,11 @@ entirely on your computer. Nothing is uploaded.
 
 ## Chrome extension (recommended)
 
-Works in Chrome, Edge, Brave and other Chromium browsers on any OS.
+Listed in the browser as **4x6 Label Fixer for eBay Shipping Labels**. Works
+in Chrome 111+, Edge, Brave and other Chromium browsers on any OS. Chrome Web
+Store submission material (listing text, permission justifications, images)
+is in [`store/`](store/listing.md); the privacy policy is
+[PRIVACY.md](PRIVACY.md).
 
 1. Download `eBayLabel4x6-chrome-extension.zip` from the
    [latest release](../../releases/latest) and unzip it.

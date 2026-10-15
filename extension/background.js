@@ -213,7 +213,7 @@ async function handleComplete(id) {
   const origin = ebayOriginOf(item);
   if (!origin) {
     await remember(item, "skipped: not from an eBay origin");
-    notify("manual", "eBay Label 4x6",
+    notify("manual", "4x6 Label Fixer",
       "This label can't be converted automatically. Click here, then drop the PDF on the converter.");
     return;
   }
@@ -231,7 +231,7 @@ async function handleComplete(id) {
     await remember(item, "converted");
   } catch (e) {
     await remember(item, "failed: " + e.message);
-    notify("manual", "eBay Label 4x6",
+    notify("manual", "4x6 Label Fixer",
       `Auto-convert failed (${e.message}). Click here, then drop the PDF on the converter.`);
   }
 }
