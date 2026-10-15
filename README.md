@@ -176,6 +176,12 @@ equivalents are in `tests/test_extension.py`, and `tests/test_extension_e2e.py`
 loads the extension into real Chromium. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).
 
+## Support
+
+The tool is free and open source. If it saves you time, tips are welcome:
+
+- [GitHub Sponsors](https://github.com/sponsors/EricSchnelker)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

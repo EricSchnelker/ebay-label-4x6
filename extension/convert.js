@@ -85,3 +85,25 @@ chrome.storage.local.get("lastAuto").then(({ lastAuto }) => {
   const when = new Date(lastAuto.at).toLocaleString();
   el.textContent = `Last auto-convert: ${when} -- ${lastAuto.scheme}: from ${lastAuto.host} -- ${lastAuto.outcome}`;
 });
+
+// Optional tip links, from tips.json (shipped inside the extension -- no
+// network request). Built with DOM APIs, https links only, opened in a new
+// tab with no opener/referrer. The tool stays free; this is just a thank-you.
+fetch(chrome.runtime.getURL("tips.json"))
+  .then((r) => r.json())
+  .then((tips) => {
+    const el = document.getElementById("tips");
+    const safe = tips.filter((t) => typeof t.url === "string" && t.url.startsWith("https://"));
+    if (!safe.length) return;
+    el.append("Free and open source. If it saves you time, tips are welcome: ");
+    safe.forEach((t, i) => {
+      if (i) el.append(" \u00b7 ");
+      const a = document.createElement("a");
+      a.href = t.url;
+      a.textContent = t.name;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      el.append(a);
+    });
+  })
+  .catch(() => { /* no tips list: show nothing */ });

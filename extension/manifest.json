@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "4x6 Label Fixer for eBay Shipping Labels",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "minimum_chrome_version": "111",
   "description": "Turns eBay's sideways letter-size shipping label PDF into an upright 4x6 for thermal printers. Runs offline.",
   "permissions": [

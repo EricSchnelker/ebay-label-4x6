@@ -31,6 +31,8 @@ Private by design. Labels contain your buyers' names and addresses, so everythin
 
 Print the result at "Actual size" / 100%, not "Fit to page", on 4x6 label stock.
 
+Free, with no ads and nothing locked. If it saves you time, there is an optional tip link on the converter page.
+
 Not affiliated with, endorsed or sponsored by eBay Inc. "eBay" is a trademark of eBay Inc.
 ```
 
